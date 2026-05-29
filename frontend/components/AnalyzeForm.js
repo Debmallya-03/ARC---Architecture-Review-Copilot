@@ -1,8 +1,8 @@
 'use client';
 
-import { Github, FileArchive, Loader2, Sparkles, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, Circle, Github, FileArchive, Loader2, Sparkles, ShieldAlert, XCircle } from 'lucide-react';
 
-export default function AnalyzeForm({ onAnalyze, loading, error }) {
+export default function AnalyzeForm({ onAnalyze, loading, error, steps = [] }) {
   return (
     <section className="min-h-screen px-5 py-6 sm:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-8">
@@ -81,6 +81,8 @@ export default function AnalyzeForm({ onAnalyze, loading, error }) {
                 <p>{error}</p>
               </div>
             ) : null}
+
+            <ProgressTimeline steps={steps} loading={loading} />
           </div>
 
           <aside className="rounded-lg border border-line bg-[#1f1f1b] p-6 text-paper shadow-soft">
@@ -101,4 +103,30 @@ export default function AnalyzeForm({ onAnalyze, loading, error }) {
       </div>
     </section>
   );
+}
+
+function ProgressTimeline({ steps, loading }) {
+  return (
+    <div className="mt-6 rounded-lg border border-line bg-paper p-4">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-neutral-700">Analysis Pipeline</h3>
+        {loading ? <Loader2 size={17} className="animate-spin text-moss" /> : null}
+      </div>
+      <div className="mt-4 grid gap-3">
+        {steps.map((step) => (
+          <div key={step.label} className="flex items-center gap-3 text-sm">
+            <StepIcon status={step.status} />
+            <span className={step.status === 'active' ? 'font-bold text-ink' : 'text-neutral-600'}>{step.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function StepIcon({ status }) {
+  if (status === 'done') return <CheckCircle2 size={18} className="text-moss" />;
+  if (status === 'active') return <Loader2 size={18} className="animate-spin text-saffron" />;
+  if (status === 'error') return <XCircle size={18} className="text-clay" />;
+  return <Circle size={18} className="text-neutral-400" />;
 }

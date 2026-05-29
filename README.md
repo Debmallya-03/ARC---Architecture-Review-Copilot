@@ -4,11 +4,24 @@ ARC is a full-stack MVP that analyzes a public GitHub repository or uploaded ZIP
 
 The project is intentionally built in JavaScript only.
 
+## Preview
+
+### Landing and Analysis Pipeline
+
+![ARC landing page with repository and ZIP analysis options](docs/screenshots/arc-landing.png)
+
+### Architecture Report Dashboard
+
+![ARC architecture report dashboard with generated analysis](docs/screenshots/arc-report.png)
+
 ## Features
 
 - Analyze a public GitHub repository URL.
 - Analyze an uploaded ZIP project.
 - Detect frontend, backend, database, auth, services, configuration, deployment, and API signals.
+- Extract route/API maps from Express, Next.js route handlers, and Next.js pages API files.
+- Extract relative import signals for a lightweight dependency graph.
+- Detect database schema hints from Prisma, Mongoose, Sequelize, and SQL files.
 - Ignore generated or heavy folders such as `node_modules`, `.git`, `.next`, `dist`, `build`, `coverage`, and cache directories.
 - Prioritize high-signal files such as `package.json`, README files, routes, controllers, services, models, middleware, config, auth, database, and deployment files.
 - Generate a structured architecture report with:
@@ -37,6 +50,7 @@ The project is intentionally built in JavaScript only.
 - Use OpenAI, Gemini, or Groq through environment variables.
 - Fall back to demo mode when no AI key is configured.
 - Optionally save generated reports with MongoDB.
+- Show an analysis progress timeline while scanning and generating a report.
 
 ## Tech Stack
 
@@ -118,11 +132,12 @@ arc/
 2. The backend clones the public repository or extracts the ZIP into a temporary directory.
 3. The scanner walks the project while skipping generated, binary, cache, and heavy folders.
 4. ARC detects stack signals from dependency files and important project paths.
-5. ARC reads compact snippets from high-priority files instead of sending the entire project to the AI model.
-6. The report generator sends the summarized context to the configured AI provider.
-7. The AI returns structured JSON containing report sections, issues, recommendations, score, and Mermaid diagrams.
-8. The backend sanitizes diagrams and provides fallback Mermaid when the AI returns invalid or plain-text diagrams.
-9. The frontend renders the dashboard and allows the user to copy diagrams or export Markdown.
+5. ARC extracts static analysis signals such as route maps, dependency edges, and database schema hints.
+6. ARC reads compact snippets from high-priority files instead of sending the entire project to the AI model.
+7. The report generator sends the summarized context to the configured AI provider.
+8. The AI returns structured JSON containing report sections, issues, recommendations, score, and Mermaid diagrams.
+9. The backend sanitizes diagrams and provides fallback Mermaid when the AI returns invalid or plain-text diagrams.
+10. The frontend renders the dashboard and allows the user to copy diagrams or export Markdown.
 
 ## Requirements
 
@@ -228,6 +243,63 @@ Backend health check:
 http://localhost:5000/api/health
 ```
 
+## Deployment
+
+ARC is designed to deploy as two separate services from the same GitHub repository.
+
+### Frontend on Vercel
+
+Use the `frontend/` folder as the Vercel project root.
+
+Recommended settings:
+
+```text
+Root Directory: frontend
+Install Command: npm install
+Build Command: npm run build
+Framework Preset: Next.js
+```
+
+Required frontend environment variable:
+
+```env
+NEXT_PUBLIC_API_URL=https://your-render-backend-url.onrender.com
+```
+
+The frontend includes `frontend/vercel.json` for deploy-friendly defaults.
+
+### Backend on Render
+
+Use the `backend/` folder as the Render service root.
+
+Recommended settings:
+
+```text
+Service Type: Web Service
+Root Directory: backend
+Build Command: npm install
+Start Command: npm start
+Health Check Path: /api/health
+```
+
+Required backend environment variables:
+
+```env
+FRONTEND_URL=https://your-vercel-frontend-url.vercel.app
+AI_PROVIDER=groq
+GROQ_API_KEY=your_key
+GROQ_MODEL=llama-3.3-70b-versatile
+```
+
+Optional:
+
+```env
+GEMINI_API_KEY=your_key
+MONGODB_URI=your_mongodb_uri
+```
+
+The repository includes `render.yaml` for Render blueprint-style deployment.
+
 ## Production Build Checks
 
 Backend syntax check:
@@ -243,6 +315,19 @@ Frontend production build:
 cd frontend
 npm run build
 ```
+
+## Continuous Integration
+
+ARC includes a GitHub Actions workflow at `.github/workflows/ci.yml`.
+
+The workflow runs on pushes and pull requests to `main`:
+
+- installs backend dependencies with `npm ci`
+- runs the backend syntax check
+- audits backend production dependencies
+- installs frontend dependencies with `npm ci`
+- builds the Next.js frontend
+- audits frontend production dependencies
 
 ## API Reference
 
@@ -285,6 +370,11 @@ Response:
     "fileCount": 120,
     "warnings": [],
     "techStack": {},
+    "staticAnalysis": {
+      "routes": [],
+      "dependencyGraph": [],
+      "databaseSchemas": []
+    },
     "structure": "...",
     "categories": {},
     "priorityFiles": []
@@ -348,6 +438,11 @@ Response:
   "overview": "...",
   "techStack": {},
   "sections": {},
+  "staticAnalysis": {
+    "routes": [],
+    "dependencyGraph": [],
+    "databaseSchemas": []
+  },
   "issues": {
     "security": [],
     "scalability": [],
@@ -380,6 +475,7 @@ The frontend dashboard includes:
 - left sidebar navigation
 - overview metrics
 - architecture score card
+- static analysis tab for routes, dependency graph signals, and database schemas
 - report sections
 - tabs for Overview, Diagrams, Security, Scalability, and Recommendations
 - Mermaid diagram rendering

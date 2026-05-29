@@ -43,12 +43,14 @@ Required JSON shape:
   "overview": "string",
   "techStack": {"frontend":[],"backend":[],"database":[],"auth":[],"deployment":[],"language":"string"},
   "sections": {"folderStructure":"string","frontend":"string","backend":"string","apiFlow":"string","database":"string","authentication":"string","deployment":"string"},
+  "staticAnalysis": {"routes":[],"dependencyGraph":[],"databaseSchemas":[]},
   "issues": {"security":[],"scalability":[],"performance":[]},
   "recommendations": [],
   "score": 0,
   "diagrams": {"system":"mermaid","api":"mermaid","auth":"mermaid","database":"mermaid","deployment":"mermaid"}
 }
 
+Score must be a number from 0 to 10, not a percentage. For example, return 8, not 80.
 Use valid Mermaid syntax without markdown fences. Every diagram value must start with one of: flowchart, graph, sequenceDiagram, erDiagram, classDiagram, stateDiagram-v2, journey, gantt, pie, mindmap. If evidence is missing, return a small fallback Mermaid diagram that says no evidence was detected. Context:
 ${JSON.stringify(repoContext).slice(0, 90000)}`;
 }
@@ -97,8 +99,18 @@ function normalizeReport(report, repoContext) {
     source: repoContext.source,
     ...report,
     mode: report.mode || 'ai',
+    score: normalizeScore(report.score),
+    staticAnalysis: report.staticAnalysis || repoContext.staticAnalysis || {},
     diagrams: normalizeDiagrams(report.diagrams)
   };
+}
+
+function normalizeScore(value) {
+  const raw = Number.parseFloat(String(value ?? '').replace(/[^\d.]/g, ''));
+  if (!Number.isFinite(raw)) return 0;
+
+  const score = raw > 10 && raw <= 100 ? raw / 10 : raw;
+  return Math.max(0, Math.min(10, Number(score.toFixed(1))));
 }
 
 function stripJsonFence(text) {

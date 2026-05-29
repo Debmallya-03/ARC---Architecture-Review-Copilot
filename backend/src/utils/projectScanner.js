@@ -17,9 +17,9 @@ const IGNORE_DIRS = new Set([
 const IMPORTANT_PATTERNS = [
   /package\.json$/i,
   /readme\.md$/i,
-  /app\.(js|jsx|mjs|cjs)$/i,
-  /server\.(js|jsx|mjs|cjs)$/i,
-  /index\.(js|jsx|mjs|cjs)$/i,
+  /app\.(js|jsx|ts|tsx|mjs|cjs)$/i,
+  /server\.(js|jsx|ts|tsx|mjs|cjs)$/i,
+  /index\.(js|jsx|ts|tsx|mjs|cjs)$/i,
   /routes?\//i,
   /controllers?\//i,
   /services?\//i,
@@ -36,6 +36,8 @@ const IMPORTANT_PATTERNS = [
 const TEXT_EXTENSIONS = new Set([
   '.js',
   '.jsx',
+  '.ts',
+  '.tsx',
   '.mjs',
   '.cjs',
   '.json',
@@ -100,6 +102,7 @@ export async function summarizeProject(root, files, source) {
   const techStack = await detectTechStack(packageFiles, files);
   const structure = buildFolderTree(files.map((file) => file.relativePath));
   const categories = categorizeFiles(files);
+  const staticAnalysis = analyzeStaticSignals(snippets, files);
   const warnings = [];
   if (files.length >= MAX_FILES) warnings.push('Large project warning: analysis was capped at the first 500 scanned files.');
 
@@ -111,6 +114,7 @@ export async function summarizeProject(root, files, source) {
     techStack,
     structure,
     categories,
+    staticAnalysis,
     priorityFiles: snippets
   };
 }
@@ -161,13 +165,138 @@ function categorizeFiles(files) {
   const paths = files.map((file) => file.relativePath);
   const match = (pattern) => paths.filter((name) => pattern.test(name)).slice(0, 20);
   return {
-    frontend: match(/app\/|pages\/|components\/|src\/components|\.jsx$/i),
+    frontend: match(/app\/|pages\/|components\/|src\/components|\.(jsx|tsx)$/i),
     backend: match(/routes?\/|controllers?\/|server\.|app\.|api\//i),
     database: match(/models?\/|schemas?\/|prisma|migrations?|database|db\./i),
     auth: match(/auth|login|jwt|passport|session/i),
     config: match(/config|\.env|package\.json|docker|compose|vercel|tailwind|next\.config/i),
     services: match(/services?\//i)
   };
+}
+
+function analyzeStaticSignals(snippets, files) {
+  return {
+    routes: extractRoutes(snippets, files),
+    dependencyGraph: extractDependencyGraph(snippets),
+    databaseSchemas: extractDatabaseSchemas(snippets)
+  };
+}
+
+function extractRoutes(snippets, files) {
+  const routes = [];
+  const addRoute = (method, routePath, source, framework) => {
+    const key = `${method}:${routePath}:${source}`;
+    if (!routes.some((route) => route.key === key)) {
+      routes.push({ key, method, path: routePath, source, framework });
+    }
+  };
+
+  for (const file of snippets) {
+    const content = file.content || '';
+    for (const match of content.matchAll(/\b(?:app|router)\.(get|post|put|patch|delete|options|head|all)\s*\(\s*['"`]([^'"`]+)['"`]/gi)) {
+      addRoute(match[1].toUpperCase(), match[2], file.path, 'Express');
+    }
+
+    for (const match of content.matchAll(/export\s+(?:async\s+)?function\s+(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\b/g)) {
+      addRoute(match[1].toUpperCase(), inferNextRoutePath(file.path), file.path, 'Next.js route handler');
+    }
+  }
+
+  for (const file of files) {
+    if (/app\/api\/.+\/route\.(js|ts)$/i.test(file.relativePath)) {
+      addRoute('ANY', inferNextRoutePath(file.relativePath), file.relativePath, 'Next.js route handler');
+    }
+    if (/pages\/api\/.+\.(js|ts)$/i.test(file.relativePath)) {
+      addRoute('ANY', inferPagesApiPath(file.relativePath), file.relativePath, 'Next.js pages API');
+    }
+  }
+
+  return routes.map(({ key, ...route }) => route).slice(0, 80);
+}
+
+function extractDependencyGraph(snippets) {
+  const edges = [];
+  for (const file of snippets) {
+    const content = file.content || '';
+    const imports = [
+      ...content.matchAll(/import\s+(?:.+?\s+from\s+)?['"`]([^'"`]+)['"`]/g),
+      ...content.matchAll(/require\s*\(\s*['"`]([^'"`]+)['"`]\s*\)/g)
+    ];
+
+    for (const match of imports) {
+      const target = match[1];
+      if (!target.startsWith('.') && !target.startsWith('@/')) continue;
+      edges.push({
+        from: file.path,
+        to: target,
+        type: target.includes('service') ? 'service' : target.includes('model') || target.includes('schema') ? 'data' : 'module'
+      });
+    }
+  }
+  return edges.slice(0, 120);
+}
+
+function extractDatabaseSchemas(snippets) {
+  const schemas = [];
+
+  for (const file of snippets) {
+    const content = file.content || '';
+
+    for (const match of content.matchAll(/model\s+(\w+)\s*\{([\s\S]*?)\n\}/g)) {
+      schemas.push({
+        type: 'Prisma model',
+        name: match[1],
+        source: file.path,
+        fields: match[2].split('\n').map((line) => line.trim().split(/\s+/)[0]).filter(Boolean).slice(0, 20)
+      });
+    }
+
+    for (const match of content.matchAll(/new\s+(?:mongoose\.)?Schema\s*\(\s*\{([\s\S]*?)\}\s*[,)]/g)) {
+      schemas.push({
+        type: 'Mongoose schema',
+        name: inferSchemaName(file.path),
+        source: file.path,
+        fields: extractObjectKeys(match[1])
+      });
+    }
+
+    for (const match of content.matchAll(/sequelize\.define\s*\(\s*['"`](\w+)['"`]\s*,\s*\{([\s\S]*?)\}\s*[,)]/g)) {
+      schemas.push({
+        type: 'Sequelize model',
+        name: match[1],
+        source: file.path,
+        fields: extractObjectKeys(match[2])
+      });
+    }
+
+    for (const match of content.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)["`]?\s*\(([\s\S]*?)\);/gi)) {
+      schemas.push({
+        type: 'SQL table',
+        name: match[1],
+        source: file.path,
+        fields: match[2].split(',').map((line) => line.trim().split(/\s+/)[0]?.replace(/["`]/g, '')).filter(Boolean).slice(0, 20)
+      });
+    }
+  }
+
+  return schemas.slice(0, 50);
+}
+
+function extractObjectKeys(text) {
+  return [...text.matchAll(/^\s*([A-Za-z_]\w*)\s*:/gm)].map((match) => match[1]).slice(0, 30);
+}
+
+function inferNextRoutePath(filePath) {
+  return `/${filePath.replace(/^.*app\/api\//i, 'api/').replace(/\/route\.(js|ts)$/i, '').replace(/\[(\w+)\]/g, ':$1')}`;
+}
+
+function inferPagesApiPath(filePath) {
+  return `/${filePath.replace(/^.*pages\/api\//i, 'api/').replace(/\.(js|ts)$/i, '').replace(/\[(\w+)\]/g, ':$1')}`;
+}
+
+function inferSchemaName(filePath) {
+  const base = path.basename(filePath, path.extname(filePath));
+  return base.charAt(0).toUpperCase() + base.slice(1);
 }
 
 function buildFolderTree(paths) {

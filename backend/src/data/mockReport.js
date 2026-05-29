@@ -18,6 +18,11 @@ export function createMockReport(repoContext, note = 'Demo mode') {
       authentication: 'Authentication flow is inferred from auth, JWT, session, passport, login, and middleware files.',
       deployment: 'Deployment readiness is inferred from Docker, Vercel, Netlify, Render, and GitHub Actions configuration.'
     },
+    staticAnalysis: repoContext.staticAnalysis || {
+      routes: [],
+      dependencyGraph: [],
+      databaseSchemas: []
+    },
     issues: {
       security: ['Validate all upload and API inputs.', 'Keep secrets in environment variables and out of committed files.'],
       scalability: ['Separate route orchestration from service logic.', 'Add queue/background processing for long-running analysis jobs.'],

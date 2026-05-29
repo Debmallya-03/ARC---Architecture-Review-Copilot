@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { Download, Gauge, Layers, RefreshCw } from 'lucide-react';
 import MermaidDiagram from './MermaidDiagram';
 
-const tabs = ['Overview', 'Diagrams', 'Security', 'Scalability', 'Recommendations'];
+const tabs = ['Overview', 'Static Analysis', 'Diagrams', 'Security', 'Scalability', 'Recommendations'];
 
 export default function ReportDashboard({ report, onReset }) {
   const [activeTab, setActiveTab] = useState('Overview');
@@ -70,6 +70,7 @@ export default function ReportDashboard({ report, onReset }) {
           </header>
 
           {activeTab === 'Overview' && <Overview report={report} />}
+          {activeTab === 'Static Analysis' && <StaticAnalysis analysis={report.staticAnalysis || {}} />}
           {activeTab === 'Diagrams' && <Diagrams diagrams={report.diagrams || {}} />}
           {activeTab === 'Security' && <IssueList title="Security Issues" items={issues.security} />}
           {activeTab === 'Scalability' && <IssueList title="Scalability Issues" items={issues.scalability} extra={issues.performance} />}
@@ -77,6 +78,57 @@ export default function ReportDashboard({ report, onReset }) {
         </section>
       </div>
     </main>
+  );
+}
+
+function StaticAnalysis({ analysis }) {
+  const routes = analysis.routes || [];
+  const dependencies = analysis.dependencyGraph || [];
+  const schemas = analysis.databaseSchemas || [];
+
+  return (
+    <div className="mt-6 grid gap-5">
+      <article className="rounded-lg border border-line bg-white p-5">
+        <h3 className="text-xl font-bold">Route/API Map</h3>
+        <div className="mt-4 grid gap-2">
+          {routes.length ? routes.map((route) => (
+            <div key={`${route.method}-${route.path}-${route.source}`} className="grid gap-2 rounded-md border border-line bg-paper p-3 text-sm md:grid-cols-[90px_1fr_1.2fr]">
+              <span className="font-black text-moss">{route.method}</span>
+              <span className="font-semibold">{route.path}</span>
+              <span className="text-neutral-600">{route.framework} - {route.source}</span>
+            </div>
+          )) : <p className="text-neutral-700">No API routes were detected from static source signals.</p>}
+        </div>
+      </article>
+
+      <article className="rounded-lg border border-line bg-white p-5">
+        <h3 className="text-xl font-bold">Dependency Graph Signals</h3>
+        <div className="mt-4 grid gap-2">
+          {dependencies.length ? dependencies.slice(0, 40).map((edge) => (
+            <div key={`${edge.from}-${edge.to}`} className="rounded-md border border-line bg-paper p-3 text-sm">
+              <span className="font-semibold">{edge.from}</span>
+              <span className="px-2 text-moss">imports</span>
+              <span className="text-neutral-700">{edge.to}</span>
+            </div>
+          )) : <p className="text-neutral-700">No relative import graph signals were detected in priority files.</p>}
+        </div>
+      </article>
+
+      <article className="rounded-lg border border-line bg-white p-5">
+        <h3 className="text-xl font-bold">Database Schema Detection</h3>
+        <div className="mt-4 grid gap-3">
+          {schemas.length ? schemas.map((schema) => (
+            <div key={`${schema.type}-${schema.name}-${schema.source}`} className="rounded-md border border-line bg-paper p-4">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <p className="font-bold">{schema.name}</p>
+                <p className="text-sm text-neutral-600">{schema.type} - {schema.source}</p>
+              </div>
+              <p className="mt-3 text-sm text-neutral-700">{(schema.fields || []).join(', ') || 'Fields not inferred'}</p>
+            </div>
+          )) : <p className="text-neutral-700">No database schema files were detected.</p>}
+        </div>
+      </article>
+    </div>
   );
 }
 
@@ -169,6 +221,16 @@ ${report.overview || ''}
 
 ## Tech Stack
 ${formatTech(report.techStack || {})}
+
+## Static Analysis
+### Routes
+${((report.staticAnalysis || {}).routes || []).map((route) => `- ${route.method} ${route.path} (${route.framework}, ${route.source})`).join('\n') || 'No routes detected.'}
+
+### Dependency Graph Signals
+${((report.staticAnalysis || {}).dependencyGraph || []).map((edge) => `- ${edge.from} -> ${edge.to}`).join('\n') || 'No dependency edges detected.'}
+
+### Database Schemas
+${((report.staticAnalysis || {}).databaseSchemas || []).map((schema) => `- ${schema.name} (${schema.type}): ${(schema.fields || []).join(', ')}`).join('\n') || 'No database schemas detected.'}
 
 ## Architecture
 ### Folder Structure
