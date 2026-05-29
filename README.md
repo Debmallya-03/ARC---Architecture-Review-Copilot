@@ -507,6 +507,4 @@ Regenerate the report after the latest diagram cleanup changes. If an AI provide
 - PDF export
 - Automated architecture comparison between two commits
 
-## License
-
-This MVP is currently provided as a project scaffold. Add a license before publishing or distributing it publicly.
+Made with ❤️ by Debmallya Bhandari
