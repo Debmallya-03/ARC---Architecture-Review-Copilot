@@ -2,6 +2,8 @@
 
 ARC is a full-stack MVP that analyzes a public GitHub repository or uploaded ZIP project and generates a visual architecture review. It detects the project structure, summarizes important files, sends compact context to a configurable AI provider, and renders a clean dashboard with architecture insights, risks, recommendations, Mermaid diagrams, and Markdown export.
 
+##Disclaimer: This entire project will later be shifted to python and RAG system 
+
 ## Preview
 
 ### Landing and Analysis Pipeline
