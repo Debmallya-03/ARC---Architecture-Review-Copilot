@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { scanSecurity } from './securityScanner.js';
+import { buildRagContext } from '../services/rag/ragContext.js';
 
 const IGNORE_DIRS = new Set([
   '.git',
@@ -87,6 +89,7 @@ export async function walkProject(root) {
 
 export async function summarizeProject(root, files, source) {
   const packageFiles = files.filter((file) => file.relativePath.endsWith('package.json'));
+  const dependencies = await collectDependencies(packageFiles);
   const importantFiles = files
     .filter((file) => IMPORTANT_PATTERNS.some((pattern) => pattern.test(file.relativePath)))
     .slice(0, 80);
@@ -99,14 +102,14 @@ export async function summarizeProject(root, files, source) {
     snippets.push({ path: file.relativePath, size: file.size, content: text });
   }
 
-  const techStack = await detectTechStack(packageFiles, files);
+  const techStack = detectTechStackFromDependencies(dependencies, files);
   const structure = buildFolderTree(files.map((file) => file.relativePath));
   const categories = categorizeFiles(files);
-  const staticAnalysis = analyzeStaticSignals(snippets, files);
+  const staticAnalysis = analyzeStaticSignals(snippets, files, dependencies);
   const warnings = [];
   if (files.length >= MAX_FILES) warnings.push('Large project warning: analysis was capped at the first 500 scanned files.');
 
-  return {
+  const context = {
     source,
     generatedAt: new Date().toISOString(),
     fileCount: files.length,
@@ -117,23 +120,13 @@ export async function summarizeProject(root, files, source) {
     staticAnalysis,
     priorityFiles: snippets
   };
+
+  context.rag = buildRagContext(context);
+  return context;
 }
 
-async function detectTechStack(packageFiles, files) {
-  const dependencies = new Set();
-  for (const file of packageFiles) {
-    try {
-      const raw = await fs.readFile(file.fullPath, 'utf8');
-      const json = JSON.parse(raw);
-      for (const section of ['dependencies', 'devDependencies']) {
-        for (const name of Object.keys(json[section] || {})) dependencies.add(name);
-      }
-    } catch {
-      dependencies.add('package.json unreadable');
-    }
-  }
-
-  const names = [...dependencies];
+function detectTechStackFromDependencies(dependencies, files) {
+  const names = dependencies || [];
   const has = (name) => names.includes(name);
   return {
     frontend: pick(names, ['next', 'react', 'vue', 'svelte', '@angular/core', 'tailwindcss']),
@@ -174,11 +167,30 @@ function categorizeFiles(files) {
   };
 }
 
-function analyzeStaticSignals(snippets, files) {
+async function collectDependencies(packageFiles) {
+  const dependencies = new Set();
+  for (const file of packageFiles) {
+    try {
+      const raw = await fs.readFile(file.fullPath, 'utf8');
+      const json = JSON.parse(raw);
+      for (const section of ['dependencies', 'devDependencies']) {
+        for (const name of Object.keys(json[section] || {})) dependencies.add(name);
+      }
+    } catch {
+      dependencies.add('package.json unreadable');
+    }
+  }
+  return [...dependencies];
+}
+
+function analyzeStaticSignals(snippets, files, dependencies) {
+  const securityScan = scanSecurity(files, snippets, dependencies);
   return {
     routes: extractRoutes(snippets, files),
     dependencyGraph: extractDependencyGraph(snippets),
-    databaseSchemas: extractDatabaseSchemas(snippets)
+    databaseSchemas: extractDatabaseSchemas(snippets),
+    securityFindings: securityScan.findings,
+    securitySummary: securityScan.summary
   };
 }
 

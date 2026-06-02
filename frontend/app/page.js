@@ -16,6 +16,7 @@ const initialSteps = [
 export default function HomePage() {
   const [mounted, setMounted] = useState(false);
   const [report, setReport] = useState(null);
+  const [repoContext, setRepoContext] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [steps, setSteps] = useState(initialSteps);
@@ -47,6 +48,7 @@ export default function HomePage() {
       setSteps(updateStep(initialSteps, 3, 'active', 0, 1, 2));
       const generated = await generateReport(analysis.repoContext);
       setSteps(updateStep(initialSteps, 4, 'active', 0, 1, 2, 3));
+      setRepoContext(analysis.repoContext);
       setReport(generated);
       setSteps(initialSteps);
     } catch (err) {
@@ -58,7 +60,7 @@ export default function HomePage() {
   }
 
   if (report) {
-    return <ReportDashboard report={report} onReset={() => setReport(null)} />;
+    return <ReportDashboard report={report} repoContext={repoContext} onReset={() => { setReport(null); setRepoContext(null); }} />;
   }
 
   if (!mounted) {

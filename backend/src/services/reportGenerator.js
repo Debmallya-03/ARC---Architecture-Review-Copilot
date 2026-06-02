@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { createMockReport } from '../data/mockReport.js';
+import { createScoreBreakdown } from '../utils/securityScanner.js';
 
 export async function generateArchitectureReport(repoContext) {
   const provider = resolveProvider();
@@ -44,15 +45,20 @@ Required JSON shape:
   "techStack": {"frontend":[],"backend":[],"database":[],"auth":[],"deployment":[],"language":"string"},
   "sections": {"folderStructure":"string","frontend":"string","backend":"string","apiFlow":"string","database":"string","authentication":"string","deployment":"string"},
   "staticAnalysis": {"routes":[],"dependencyGraph":[],"databaseSchemas":[]},
+  "citations": {"overview":[],"frontend":[],"backend":[],"apiFlow":[],"database":[],"authentication":[],"security":[],"scalability":[],"performance":[],"deployment":[],"diagrams":[]},
   "issues": {"security":[],"scalability":[],"performance":[]},
   "recommendations": [],
   "score": 0,
+  "scoreBreakdown": {"overall":0,"security":0,"scalability":0,"maintainability":0,"performance":0,"deployment":0,"documentation":0},
   "diagrams": {"system":"mermaid","api":"mermaid","auth":"mermaid","database":"mermaid","deployment":"mermaid"}
 }
 
 Score must be a number from 0 to 10, not a percentage. For example, return 8, not 80.
+Use scoreBreakdown for category-level scores from 0 to 10. Respect deterministic security findings from repoContext.staticAnalysis.securityFindings.
+Use repoContext.rag.sections as retrieved evidence for each report section. Add citations using repoContext.rag.citations. Each citation must include path, lines, and type.
+Prefer cited evidence over broad assumptions. If retrieved evidence is weak, say that evidence is limited.
 Use valid Mermaid syntax without markdown fences. Every diagram value must start with one of: flowchart, graph, sequenceDiagram, erDiagram, classDiagram, stateDiagram-v2, journey, gantt, pie, mindmap. If evidence is missing, return a small fallback Mermaid diagram that says no evidence was detected. Context:
-${JSON.stringify(repoContext).slice(0, 90000)}`;
+${JSON.stringify(compactRepoContext(repoContext)).slice(0, 30000)}`;
 }
 
 async function callOpenAI(prompt, repoContext) {
@@ -85,7 +91,8 @@ async function callGroq(prompt, repoContext) {
     {
       model: process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2
+      temperature: 0.2,
+      max_tokens: 2000
     },
     { headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` } }
   );
@@ -93,16 +100,119 @@ async function callGroq(prompt, repoContext) {
 }
 
 function normalizeReport(report, repoContext) {
+  const score = normalizeScore(report.score);
   return {
     id: report.id || `arc-${Date.now()}`,
     createdAt: new Date().toISOString(),
     source: repoContext.source,
     ...report,
     mode: report.mode || 'ai',
-    score: normalizeScore(report.score),
-    staticAnalysis: report.staticAnalysis || repoContext.staticAnalysis || {},
+    score,
+    scoreBreakdown: normalizeScoreBreakdown(report.scoreBreakdown, repoContext, score),
+    staticAnalysis: mergeStaticAnalysis(repoContext.staticAnalysis, report.staticAnalysis),
+    citations: normalizeCitations(report.citations, repoContext.rag?.citations),
+    rag: {
+      enabled: Boolean(repoContext.rag?.enabled),
+      strategy: repoContext.rag?.strategy || 'none',
+      chunkCount: repoContext.rag?.chunkCount || 0
+    },
     diagrams: normalizeDiagrams(report.diagrams)
   };
+}
+
+function compactRepoContext(repoContext) {
+  const { priorityFiles, ...rest } = repoContext;
+  return {
+    ...rest,
+    structure: truncateText(repoContext.structure, 4500),
+    staticAnalysis: compactStaticAnalysis(repoContext.staticAnalysis),
+    rag: compactRag(repoContext.rag),
+    priorityFiles: (priorityFiles || []).map((file) => ({
+      path: file.path,
+      size: file.size
+    }))
+  };
+}
+
+function compactStaticAnalysis(staticAnalysis = {}) {
+  return {
+    routes: (staticAnalysis.routes || []).slice(0, 35),
+    dependencyGraph: (staticAnalysis.dependencyGraph || []).slice(0, 45),
+    databaseSchemas: (staticAnalysis.databaseSchemas || []).slice(0, 25),
+    securityFindings: (staticAnalysis.securityFindings || []).slice(0, 25),
+    securitySummary: staticAnalysis.securitySummary || { critical: 0, high: 0, medium: 0, low: 0 }
+  };
+}
+
+function compactRag(rag = {}) {
+  const sections = {};
+  for (const [section, chunks] of Object.entries(rag.sections || {})) {
+    sections[section] = (chunks || []).slice(0, 2).map((chunk) => ({
+      path: chunk.path,
+      type: chunk.type,
+      lines: chunk.lines,
+      score: chunk.score,
+      content: truncateText(chunk.content, 700)
+    }));
+  }
+
+  return {
+    enabled: Boolean(rag.enabled),
+    strategy: rag.strategy || 'keyword-retrieval',
+    chunkCount: rag.chunkCount || 0,
+    sections,
+    citations: rag.citations || {}
+  };
+}
+
+function truncateText(value = '', maxLength) {
+  const text = String(value || '');
+  return text.length > maxLength ? `${text.slice(0, maxLength)}\n... [truncated]` : text;
+}
+
+function normalizeCitations(reportCitations = {}, fallbackCitations = {}) {
+  const keys = ['overview', 'frontend', 'backend', 'apiFlow', 'database', 'authentication', 'security', 'scalability', 'performance', 'deployment', 'diagrams'];
+  return Object.fromEntries(
+    keys.map((key) => {
+      const citations = Array.isArray(reportCitations[key]) && reportCitations[key].length
+        ? reportCitations[key]
+        : fallbackCitations[key] || [];
+      return [key, citations.map(normalizeCitation).filter(Boolean).slice(0, 8)];
+    })
+  );
+}
+
+function normalizeCitation(citation) {
+  if (!citation || typeof citation !== 'object') return null;
+  return {
+    path: String(citation.path || 'unknown'),
+    lines: String(citation.lines || ''),
+    type: String(citation.type || 'source')
+  };
+}
+
+function mergeStaticAnalysis(repoAnalysis = {}, reportAnalysis = {}) {
+  return {
+    ...repoAnalysis,
+    ...reportAnalysis,
+    routes: reportAnalysis.routes?.length ? reportAnalysis.routes : repoAnalysis.routes || [],
+    dependencyGraph: reportAnalysis.dependencyGraph?.length ? reportAnalysis.dependencyGraph : repoAnalysis.dependencyGraph || [],
+    databaseSchemas: reportAnalysis.databaseSchemas?.length ? reportAnalysis.databaseSchemas : repoAnalysis.databaseSchemas || [],
+    securityFindings: repoAnalysis.securityFindings || [],
+    securitySummary: repoAnalysis.securitySummary || { critical: 0, high: 0, medium: 0, low: 0 }
+  };
+}
+
+function normalizeScoreBreakdown(scoreBreakdown, repoContext, score) {
+  const deterministic = createScoreBreakdown(repoContext, score);
+  const merged = { ...deterministic, ...(scoreBreakdown || {}) };
+
+  return Object.fromEntries(
+    Object.entries(deterministic).map(([key, fallback]) => [
+      key,
+      normalizeScore(merged[key] ?? fallback)
+    ])
+  );
 }
 
 function normalizeScore(value) {

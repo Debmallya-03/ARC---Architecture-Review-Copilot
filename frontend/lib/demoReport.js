@@ -5,6 +5,55 @@ export const demoReport = {
   mode: 'demo',
   overview: 'ARC detected a Next.js frontend, Express backend, service-layer modules, API routes, and database schema hints. This sample report is used for local previews and README screenshots.',
   score: 8,
+  scoreBreakdown: {
+    overall: 8,
+    security: 7.5,
+    scalability: 7.8,
+    maintainability: 8.5,
+    performance: 7.2,
+    deployment: 8,
+    documentation: 8.4
+  },
+  rag: {
+    enabled: true,
+    strategy: 'keyword-retrieval',
+    chunkCount: 42
+  },
+  citations: {
+    overview: [
+      { path: 'README.md', lines: '1-42', type: 'docs' },
+      { path: 'package.json', lines: '1-38', type: 'manifest' }
+    ],
+    frontend: [
+      { path: 'frontend/app/page.js', lines: '1-90', type: 'frontend' },
+      { path: 'frontend/components/ReportDashboard.js', lines: '1-120', type: 'frontend' }
+    ],
+    backend: [
+      { path: 'backend/src/routes/report.js', lines: '1-42', type: 'route' },
+      { path: 'backend/src/services/reportGenerator.js', lines: '1-110', type: 'service' }
+    ],
+    apiFlow: [
+      { path: 'backend/src/routes/analyze.js', lines: '1-38', type: 'route' }
+    ],
+    database: [
+      { path: 'backend/src/services/reportStore.js', lines: '1-52', type: 'database' }
+    ],
+    authentication: [],
+    security: [
+      { path: 'backend/src/utils/securityScanner.js', lines: '1-90', type: 'source' }
+    ],
+    scalability: [
+      { path: 'backend/src/services/rag/ragContext.js', lines: '1-90', type: 'service' }
+    ],
+    performance: [],
+    deployment: [
+      { path: 'render.yaml', lines: '1-28', type: 'config' },
+      { path: 'frontend/vercel.json', lines: '1-5', type: 'config' }
+    ],
+    diagrams: [
+      { path: 'backend/src/services/rag/ragContext.js', lines: '1-90', type: 'service' }
+    ]
+  },
   techStack: {
     frontend: ['next', 'react', 'tailwindcss'],
     backend: ['express'],
@@ -35,6 +84,23 @@ export const demoReport = {
     ],
     databaseSchemas: [
       { type: 'Mongoose schema', name: 'Report', source: 'backend/src/services/reportStore.js', fields: ['title', 'source', 'mode', 'overview', 'score', 'diagrams'] }
+    ],
+    securitySummary: { critical: 0, high: 1, medium: 2, low: 1 },
+    securityFindings: [
+      {
+        severity: 'high',
+        title: 'Upload isolation recommended',
+        description: 'ZIP extraction is part of the analysis flow and should be isolated before public production usage.',
+        source: 'backend/src/routes/analyze.js',
+        recommendation: 'Run ZIP extraction inside a worker sandbox and enforce strict file count and size limits.'
+      },
+      {
+        severity: 'medium',
+        title: 'Rate limiting not detected',
+        description: 'Public analysis endpoints should protect expensive AI and clone operations from abuse.',
+        source: 'backend/package.json',
+        recommendation: 'Add express-rate-limit or gateway-level rate limiting.'
+      }
     ]
   },
   issues: {

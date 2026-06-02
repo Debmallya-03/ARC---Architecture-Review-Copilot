@@ -1,5 +1,34 @@
 export function createMockReport(repoContext, note = 'Demo mode') {
   const tech = repoContext.techStack || {};
+  const staticAnalysis = repoContext.staticAnalysis || {
+    routes: [],
+    dependencyGraph: [],
+    databaseSchemas: [],
+    securityFindings: [],
+    securitySummary: { critical: 0, high: 0, medium: 0, low: 0 }
+  };
+  const scoreBreakdown = {
+    overall: 7,
+    security: Math.max(0, 10 - (staticAnalysis.securityFindings || []).length),
+    scalability: 7,
+    maintainability: 8,
+    performance: 7,
+    deployment: (tech.deployment || []).length ? 8 : 5,
+    documentation: 7
+  };
+  const citations = repoContext.rag?.citations || {
+    overview: [],
+    frontend: [],
+    backend: [],
+    apiFlow: [],
+    database: [],
+    authentication: [],
+    security: [],
+    scalability: [],
+    performance: [],
+    deployment: [],
+    diagrams: []
+  };
   return {
     id: `demo-${Date.now()}`,
     createdAt: new Date().toISOString(),
@@ -18,11 +47,7 @@ export function createMockReport(repoContext, note = 'Demo mode') {
       authentication: 'Authentication flow is inferred from auth, JWT, session, passport, login, and middleware files.',
       deployment: 'Deployment readiness is inferred from Docker, Vercel, Netlify, Render, and GitHub Actions configuration.'
     },
-    staticAnalysis: repoContext.staticAnalysis || {
-      routes: [],
-      dependencyGraph: [],
-      databaseSchemas: []
-    },
+    staticAnalysis,
     issues: {
       security: ['Validate all upload and API inputs.', 'Keep secrets in environment variables and out of committed files.'],
       scalability: ['Separate route orchestration from service logic.', 'Add queue/background processing for long-running analysis jobs.'],
@@ -33,7 +58,14 @@ export function createMockReport(repoContext, note = 'Demo mode') {
       'Document deployment environments and required variables.',
       'Add request size limits, rate limits, and structured logging before production use.'
     ],
-    score: 7,
+    score: scoreBreakdown.overall,
+    scoreBreakdown,
+    citations,
+    rag: {
+      enabled: Boolean(repoContext.rag?.enabled),
+      strategy: repoContext.rag?.strategy || 'keyword-retrieval',
+      chunkCount: repoContext.rag?.chunkCount || 0
+    },
     diagrams: {
       system: `flowchart LR
 User[User] --> UI[Next.js Frontend]

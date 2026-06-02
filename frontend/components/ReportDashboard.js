@@ -1,12 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Download, Gauge, Layers, RefreshCw } from 'lucide-react';
+import { Download, Gauge, Layers, Loader2, RefreshCw, Send } from 'lucide-react';
 import MermaidDiagram from './MermaidDiagram';
+import { askRepoQuestion } from '../lib/api';
 
-const tabs = ['Overview', 'Static Analysis', 'Diagrams', 'Security', 'Scalability', 'Recommendations'];
+const tabs = ['Overview', 'Ask ARC', 'Static Analysis', 'Diagrams', 'Security', 'Scalability', 'Recommendations'];
 
-export default function ReportDashboard({ report, onReset }) {
+export default function ReportDashboard({ report, repoContext, onReset }) {
   const [activeTab, setActiveTab] = useState('Overview');
   const markdown = useMemo(() => toMarkdown(report), [report]);
   const issues = report.issues || {};
@@ -70,14 +71,98 @@ export default function ReportDashboard({ report, onReset }) {
           </header>
 
           {activeTab === 'Overview' && <Overview report={report} />}
+          {activeTab === 'Ask ARC' && <RepoChat report={report} repoContext={repoContext} />}
           {activeTab === 'Static Analysis' && <StaticAnalysis analysis={report.staticAnalysis || {}} />}
           {activeTab === 'Diagrams' && <Diagrams diagrams={report.diagrams || {}} />}
-          {activeTab === 'Security' && <IssueList title="Security Issues" items={issues.security} />}
+          {activeTab === 'Security' && <SecurityView issues={issues.security} findings={(report.staticAnalysis || {}).securityFindings || []} summary={(report.staticAnalysis || {}).securitySummary || {}} />}
           {activeTab === 'Scalability' && <IssueList title="Scalability Issues" items={issues.scalability} extra={issues.performance} />}
           {activeTab === 'Recommendations' && <IssueList title="Recommendations" items={report.recommendations} />}
         </section>
       </div>
     </main>
+  );
+}
+
+function RepoChat({ report, repoContext }) {
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState([
+    {
+      role: 'assistant',
+      content: 'Ask me about architecture, APIs, auth, database, security, scalability, or where a feature lives in this repository.',
+      citations: []
+    }
+  ]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submitQuestion(event) {
+    event.preventDefault();
+    const trimmed = question.trim();
+    if (!trimmed || loading) return;
+
+    setMessages((current) => [...current, { role: 'user', content: trimmed, citations: [] }]);
+    setQuestion('');
+    setError('');
+    setLoading(true);
+
+    try {
+      const answer = await askRepoQuestion({ question: trimmed, repoContext, report });
+      setMessages((current) => [
+        ...current,
+        {
+          role: 'assistant',
+          content: answer.answer,
+          citations: answer.citations || [],
+          mode: answer.mode
+        }
+      ]);
+    } catch (err) {
+      setError(err.message || 'Repo chat failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-6 rounded-lg border border-line bg-white p-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-2xl font-black">Ask ARC</h3>
+          <p className="mt-1 text-sm text-neutral-600">RAG chat over retrieved repository chunks.</p>
+        </div>
+        <span className="rounded bg-paper px-3 py-2 text-xs font-bold text-moss">
+          {repoContext?.rag?.chunkCount || report.rag?.chunkCount || 0} chunks indexed
+        </span>
+      </div>
+
+      <div className="mt-5 grid max-h-[520px] gap-3 overflow-auto pr-1">
+        {messages.map((message, index) => (
+          <div key={`${message.role}-${index}`} className={`rounded-md border border-line p-4 ${message.role === 'user' ? 'bg-ink text-paper' : 'bg-paper text-ink'}`}>
+            <p className="whitespace-pre-wrap leading-7">{message.content}</p>
+            {message.mode ? <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] opacity-70">{message.mode}</p> : null}
+            <CitationList citations={message.citations} />
+          </div>
+        ))}
+      </div>
+
+      {error ? <p className="mt-4 rounded-md border border-clay/30 bg-clay/10 p-3 text-sm text-clay">{error}</p> : null}
+
+      <form onSubmit={submitQuestion} className="mt-5 flex flex-col gap-3 sm:flex-row">
+        <input
+          value={question}
+          onChange={(event) => setQuestion(event.target.value)}
+          placeholder="Where is authentication handled?"
+          className="h-12 min-w-0 flex-1 rounded-md border border-line bg-paper px-4 outline-none ring-moss/20 transition focus:ring-4"
+        />
+        <button
+          disabled={loading}
+          className="inline-flex h-12 items-center justify-center gap-2 rounded-md bg-moss px-5 font-bold text-white transition hover:bg-[#415d44] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+          Ask
+        </button>
+      </form>
+    </div>
   );
 }
 
@@ -135,6 +220,7 @@ function StaticAnalysis({ analysis }) {
 function Overview({ report }) {
   const tech = report.techStack || {};
   const sections = report.sections || {};
+  const citations = report.citations || {};
   return (
     <div className="mt-6 grid gap-5">
       <div className="grid gap-4 md:grid-cols-3">
@@ -142,20 +228,93 @@ function Overview({ report }) {
         <Metric icon={<Layers size={20} />} label="Mode" value={report.mode || 'ai'} />
         <Metric icon={<Layers size={20} />} label="Language" value={tech.language || 'Unknown'} />
       </div>
+      {report.rag?.enabled ? (
+        <div className="rounded-lg border border-line bg-white p-5">
+          <h3 className="text-xl font-bold">RAG Evidence Layer</h3>
+          <p className="mt-2 text-neutral-700">
+            {report.rag.chunkCount || 0} repository chunks indexed with {report.rag.strategy || 'keyword'} retrieval.
+          </p>
+        </div>
+      ) : null}
+      <ScoreBreakdown breakdown={report.scoreBreakdown || {}} />
       <div className="rounded-lg border border-line bg-white p-5">
         <h3 className="text-xl font-bold">Project Overview</h3>
         <p className="mt-3 leading-7 text-neutral-700">{report.overview}</p>
+        <CitationList citations={citations.overview} />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <InfoBlock title="Tech Stack" text={formatTech(tech)} />
-        <InfoBlock title="Folder Structure" text={sections.folderStructure} />
-        <InfoBlock title="Frontend Architecture" text={sections.frontend} />
-        <InfoBlock title="Backend Architecture" text={sections.backend} />
-        <InfoBlock title="API Flow" text={sections.apiFlow} />
-        <InfoBlock title="Database Architecture" text={sections.database} />
-        <InfoBlock title="Authentication Flow" text={sections.authentication} />
-        <InfoBlock title="Deployment Readiness" text={sections.deployment} />
+        <InfoBlock title="Folder Structure" text={sections.folderStructure} citations={citations.overview} />
+        <InfoBlock title="Frontend Architecture" text={sections.frontend} citations={citations.frontend} />
+        <InfoBlock title="Backend Architecture" text={sections.backend} citations={citations.backend} />
+        <InfoBlock title="API Flow" text={sections.apiFlow} citations={citations.apiFlow} />
+        <InfoBlock title="Database Architecture" text={sections.database} citations={citations.database} />
+        <InfoBlock title="Authentication Flow" text={sections.authentication} citations={citations.authentication} />
+        <InfoBlock title="Deployment Readiness" text={sections.deployment} citations={citations.deployment} />
       </div>
+    </div>
+  );
+}
+
+function ScoreBreakdown({ breakdown }) {
+  const items = [
+    ['Security', breakdown.security],
+    ['Scalability', breakdown.scalability],
+    ['Maintainability', breakdown.maintainability],
+    ['Performance', breakdown.performance],
+    ['Deployment', breakdown.deployment],
+    ['Documentation', breakdown.documentation]
+  ];
+
+  return (
+    <article className="rounded-lg border border-line bg-white p-5">
+      <h3 className="text-xl font-bold">Score Breakdown</h3>
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        {items.map(([label, value]) => (
+          <div key={label} className="rounded-md border border-line bg-paper p-4">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-bold text-neutral-700">{label}</span>
+              <span className="text-lg font-black">{formatScore(value)}/10</span>
+            </div>
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-line">
+              <div className="h-full rounded-full bg-moss" style={{ width: `${Math.max(0, Math.min(100, Number(value || 0) * 10))}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function SecurityView({ issues = [], findings = [], summary = {} }) {
+  return (
+    <div className="mt-6 grid gap-5">
+      <article className="rounded-lg border border-line bg-white p-5">
+        <h3 className="text-2xl font-black">Deterministic Security Scan</h3>
+        <div className="mt-4 grid gap-3 sm:grid-cols-4">
+          {['critical', 'high', 'medium', 'low'].map((level) => (
+            <div key={level} className="rounded-md border border-line bg-paper p-4">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-500">{level}</p>
+              <p className="mt-2 text-3xl font-black">{summary[level] || 0}</p>
+            </div>
+          ))}
+        </div>
+        <div className="mt-5 grid gap-3">
+          {findings.length ? findings.map((finding) => (
+            <div key={`${finding.severity}-${finding.title}-${finding.source}`} className="rounded-md border border-line bg-paper p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <p className="font-bold">{finding.title}</p>
+                <span className={`w-fit rounded px-2 py-1 text-xs font-black uppercase ${severityClass(finding.severity)}`}>{finding.severity}</span>
+              </div>
+              <p className="mt-2 text-sm text-neutral-700">{finding.description}</p>
+              <p className="mt-2 text-xs font-semibold text-moss">{finding.source}</p>
+              <p className="mt-3 text-sm text-neutral-800">{finding.recommendation}</p>
+            </div>
+          )) : <p className="text-neutral-700">No deterministic security findings were detected.</p>}
+        </div>
+      </article>
+
+      <IssueList title="AI Security Review" items={issues} />
     </div>
   );
 }
@@ -181,12 +340,29 @@ function Metric({ icon, label, value }) {
   );
 }
 
-function InfoBlock({ title, text }) {
+function InfoBlock({ title, text, citations }) {
   return (
     <article className="rounded-lg border border-line bg-white p-5">
       <h3 className="text-lg font-bold">{title}</h3>
       <p className="mt-3 whitespace-pre-wrap leading-7 text-neutral-700">{text || 'No strong evidence found.'}</p>
+      <CitationList citations={citations} />
     </article>
+  );
+}
+
+function CitationList({ citations = [] }) {
+  if (!citations?.length) return null;
+  return (
+    <div className="mt-4 border-t border-line pt-3">
+      <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-500">Evidence</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {citations.slice(0, 6).map((citation, index) => (
+          <span key={`${citation.path}-${citation.lines}-${index}`} className="rounded bg-paper px-2 py-1 text-xs font-semibold text-moss">
+            {citation.path}{citation.lines ? `:${citation.lines}` : ''}
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -196,16 +372,75 @@ function IssueList({ title, items = [], extra = [] }) {
     <div className="mt-6 rounded-lg border border-line bg-white p-5">
       <h3 className="text-2xl font-black">{title}</h3>
       <div className="mt-5 grid gap-3">
-        {all.length ? all.map((item) => <div key={item} className="rounded-md border border-line bg-paper p-4 text-neutral-800">{item}</div>) : <p>No issues reported.</p>}
+        {all.length ? all.map((item, index) => (
+          <div key={issueKey(item, index)} className="rounded-md border border-line bg-paper p-4 text-neutral-800">
+            <IssueContent item={item} />
+          </div>
+        )) : <p>No issues reported.</p>}
       </div>
     </div>
   );
+}
+
+function IssueContent({ item }) {
+  if (typeof item === 'string' || typeof item === 'number') {
+    return <p>{item}</p>;
+  }
+
+  if (Array.isArray(item)) {
+    return <p>{item.map((entry) => issueText(entry)).join(', ')}</p>;
+  }
+
+  if (item && typeof item === 'object') {
+    return (
+      <div>
+        <p className="font-bold">{item.title || item.issue || item.name || 'Finding'}</p>
+        {item.description ? <p className="mt-2 text-sm text-neutral-700">{item.description}</p> : null}
+        {item.source ? <p className="mt-2 text-xs font-semibold text-moss">{item.source}</p> : null}
+        {item.recommendation ? <p className="mt-3 text-sm">{item.recommendation}</p> : null}
+        {!item.description && !item.recommendation ? <p className="mt-2 text-sm text-neutral-700">{issueText(item)}</p> : null}
+      </div>
+    );
+  }
+
+  return <p>{String(item || '')}</p>;
+}
+
+function issueKey(item, index) {
+  if (typeof item === 'string' || typeof item === 'number') return `${item}-${index}`;
+  if (item && typeof item === 'object') {
+    return `${item.title || item.issue || item.name || item.source || 'issue'}-${index}`;
+  }
+  return `issue-${index}`;
+}
+
+function issueText(item) {
+  if (typeof item === 'string' || typeof item === 'number') return String(item);
+  if (Array.isArray(item)) return item.map((entry) => issueText(entry)).join(', ');
+  if (item && typeof item === 'object') {
+    return Object.entries(item)
+      .map(([key, value]) => `${key}: ${issueText(value)}`)
+      .join('; ');
+  }
+  return String(item || '');
 }
 
 function formatTech(tech) {
   return Object.entries(tech)
     .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(', ') || 'None detected' : value}`)
     .join('\n');
+}
+
+function formatScore(value) {
+  const score = Number(value || 0);
+  return Number.isInteger(score) ? score : score.toFixed(1);
+}
+
+function severityClass(severity) {
+  if (severity === 'critical') return 'bg-clay text-white';
+  if (severity === 'high') return 'bg-clay/15 text-clay';
+  if (severity === 'medium') return 'bg-saffron/20 text-[#80600d]';
+  return 'bg-moss/15 text-moss';
 }
 
 function toMarkdown(report) {
@@ -215,6 +450,12 @@ function toMarkdown(report) {
 
 Source: ${report.source || 'Unknown'}
 Score: ${report.score || 0}/10
+
+## Score Breakdown
+${Object.entries(report.scoreBreakdown || {}).map(([key, value]) => `- ${key}: ${formatScore(value)}/10`).join('\n') || 'No score breakdown available.'}
+
+## RAG Evidence
+${report.rag?.enabled ? `Strategy: ${report.rag.strategy}\nChunks indexed: ${report.rag.chunkCount}` : 'RAG evidence was not available for this report.'}
 
 ## Overview
 ${report.overview || ''}
@@ -231,6 +472,9 @@ ${((report.staticAnalysis || {}).dependencyGraph || []).map((edge) => `- ${edge.
 
 ### Database Schemas
 ${((report.staticAnalysis || {}).databaseSchemas || []).map((schema) => `- ${schema.name} (${schema.type}): ${(schema.fields || []).join(', ')}`).join('\n') || 'No database schemas detected.'}
+
+### Deterministic Security Findings
+${((report.staticAnalysis || {}).securityFindings || []).map((finding) => `- [${finding.severity}] ${finding.title} (${finding.source}): ${finding.recommendation}`).join('\n') || 'No deterministic security findings detected.'}
 
 ## Architecture
 ### Folder Structure
@@ -254,19 +498,32 @@ ${sections.authentication || ''}
 ### Deployment
 ${sections.deployment || ''}
 
+## Citations
+${formatCitations(report.citations || {})}
+
 ## Security
-${(issues.security || []).map((item) => `- ${item}`).join('\n')}
+${(issues.security || []).map((item) => `- ${issueText(item)}`).join('\n')}
 
 ## Scalability
-${(issues.scalability || []).map((item) => `- ${item}`).join('\n')}
+${(issues.scalability || []).map((item) => `- ${issueText(item)}`).join('\n')}
 
 ## Performance
-${(issues.performance || []).map((item) => `- ${item}`).join('\n')}
+${(issues.performance || []).map((item) => `- ${issueText(item)}`).join('\n')}
 
 ## Recommendations
-${(report.recommendations || []).map((item) => `- ${item}`).join('\n')}
+${(report.recommendations || []).map((item) => `- ${issueText(item)}`).join('\n')}
 
 ## Diagrams
 ${Object.entries(report.diagrams || {}).map(([name, code]) => `### ${name}\n\`\`\`mermaid\n${code}\n\`\`\``).join('\n\n')}
 `;
+}
+
+function formatCitations(citations) {
+  const lines = [];
+  for (const [section, sectionCitations] of Object.entries(citations)) {
+    if (!sectionCitations?.length) continue;
+    lines.push(`### ${section}`);
+    lines.push(...sectionCitations.map((citation) => `- ${citation.path}${citation.lines ? `:${citation.lines}` : ''} (${citation.type || 'source'})`));
+  }
+  return lines.length ? lines.join('\n') : 'No citations available.';
 }

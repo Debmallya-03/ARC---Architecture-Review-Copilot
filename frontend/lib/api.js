@@ -35,3 +35,12 @@ export async function generateReport(repoContext) {
   });
   return parseResponse(response);
 }
+
+export async function askRepoQuestion({ question, repoContext, report }) {
+  const response = await fetch(`${API_URL}/api/rag/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, repoContext, report })
+  });
+  return parseResponse(response);
+}
