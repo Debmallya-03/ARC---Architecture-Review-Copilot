@@ -926,6 +926,9 @@ Regenerate the report after the latest diagram cleanup changes. If an AI provide
 - Automated architecture comparison between two commits
 
 ---
+## License
+
+This project is licensed under the MIT License.
 
 ## Author
 
