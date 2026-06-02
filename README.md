@@ -4,8 +4,6 @@
 
 It scans project structure, detects architecture signals, builds compact RAG evidence, sends the right context to a configurable AI provider, and renders a clean dashboard with insights, risks, recommendations, Mermaid diagrams, citations, repo chat, and Markdown export.
 
-> **Disclaimer:** This entire project will later be shifted to Python and a deeper RAG system.
-
 ---
 
 ## Quick View
